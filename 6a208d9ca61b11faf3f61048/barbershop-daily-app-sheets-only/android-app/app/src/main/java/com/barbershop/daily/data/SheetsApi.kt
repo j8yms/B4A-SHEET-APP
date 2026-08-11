@@ -54,7 +54,7 @@ object SheetsApi {
     fun listToday(token: String): JSONObject =
         post("listToday", JSONObject().put("token", token))
 
-    fun createTx(token: String, clientName: String, amount: Double, serviceType: String, servedBy: String, groomedBy: String, payMethod: String, status: String, mpesaTo: String): JSONObject =
+    fun createTx(token: String, clientName: String, amount: Double, serviceType: String, servedBy: String, groomedBy: String, payMethod: String, status: String, mpesaTo: String, txType: String = "service", itemName: String = ""): JSONObject =
         post(
             "createTx",
             JSONObject()
@@ -67,9 +67,11 @@ object SheetsApi {
                 .put("payMethod", payMethod)
                 .put("status", status)
                 .put("mpesaTo", mpesaTo)
+                .put("txType", txType)
+                .put("itemName", itemName)
         )
 
-    fun updateTx(token: String, txId: String, clientName: String, amount: Double, serviceType: String, servedBy: String, groomedBy: String, payMethod: String, status: String, mpesaTo: String): JSONObject =
+    fun updateTx(token: String, txId: String, clientName: String, amount: Double, serviceType: String, servedBy: String, groomedBy: String, payMethod: String, status: String, mpesaTo: String, txType: String = "service", itemName: String = ""): JSONObject =
         post(
             "updateTx",
             JSONObject()
@@ -83,10 +85,20 @@ object SheetsApi {
                 .put("payMethod", payMethod)
                 .put("status", status)
                 .put("mpesaTo", mpesaTo)
+                .put("txType", txType)
+                .put("itemName", itemName)
         )
 
-    fun deleteTx(token: String, txId: String): JSONObject =
-        post("deleteTx", JSONObject().put("token", token).put("txId", txId))
+    fun deleteTx(token: String, txId: String, clientName: String = "", amount: Double = 0.0, createdBy: String = ""): JSONObject =
+        post(
+            "deleteTx",
+            JSONObject()
+                .put("token", token)
+                .put("txId", txId)
+                .put("clientName", clientName)
+                .put("amount", amount)
+                .put("createdBy", createdBy)
+        )
 
     fun adminListDay(token: String, tabName: String): JSONObject =
         post("adminListDay", JSONObject().put("token", token).put("tabName", tabName))
@@ -98,6 +110,56 @@ object SheetsApi {
                 .put("token", token)
                 .put("staffName", staffName)
                 .put("staffAction", action) // "reset", "suspend", "recall"
+        )
+
+    fun listUsers(token: String): JSONObject =
+        post("listUsers", JSONObject().put("token", token))
+
+    fun renameUser(token: String, oldName: String, newName: String): JSONObject =
+        post(
+            "renameUser",
+            JSONObject()
+                .put("token", token)
+                .put("oldName", oldName)
+                .put("newName", newName)
+        )
+
+    fun listQueue(token: String): JSONObject =
+        post("listQueue", JSONObject().put("token", token))
+
+    fun addToQueue(token: String, clientName: String, service: String, phone: String, note: String): JSONObject =
+        post(
+            "addToQueue",
+            JSONObject()
+                .put("token", token)
+                .put("clientName", clientName)
+                .put("service", service)
+                .put("phone", phone)
+                .put("note", note)
+        )
+
+    fun startQueueService(token: String, qId: String, barber: String): JSONObject =
+        post(
+            "startQueueService",
+            JSONObject()
+                .put("token", token)
+                .put("qId", qId)
+                .put("barber", barber)
+        )
+
+    fun completeQueue(token: String, qId: String): JSONObject =
+        post("completeQueue", JSONObject().put("token", token).put("qId", qId))
+
+    fun removeFromQueue(token: String, qId: String): JSONObject =
+        post("removeFromQueue", JSONObject().put("token", token).put("qId", qId))
+
+    fun setBarberFree(token: String, barber: String, free: Boolean): JSONObject =
+        post(
+            "setBarberFree",
+            JSONObject()
+                .put("token", token)
+                .put("barber", barber)
+                .put("free", free)
         )
 }
 

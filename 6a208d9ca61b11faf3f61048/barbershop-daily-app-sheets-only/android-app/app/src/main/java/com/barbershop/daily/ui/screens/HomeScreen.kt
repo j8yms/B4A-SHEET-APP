@@ -21,6 +21,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Default.Home),
     Add("Add", Icons.Default.Add),
     History("History", Icons.Default.List),
+    Queue("Queue", Icons.Default.Queue),
     Reports("Reports", Icons.Default.Info),
     Admin("Admin", Icons.Default.Settings),
     Profile("Profile", Icons.Default.Person)
@@ -127,10 +128,11 @@ fun HomeScreen(onSignOut: () -> Unit) {
                             AddServiceScreen(
                                 profile = profile!!,
                                 session = session!!,
+                                today = today,
                                 editingTx = editingTransaction,
-                                onDone = { 
+                                onDone = {
                                     editingTransaction = null
-                                    selectedTab = Tab.History 
+                                    selectedTab = Tab.History
                                 }
                             )
                         }
@@ -143,7 +145,6 @@ fun HomeScreen(onSignOut: () -> Unit) {
                         HistoryScreen(
                             profile = profile!!,
                             session = session!!,
-                            today = today,
                             onEdit = { tx ->
                                 editingTransaction = tx
                                 selectedTab = Tab.Add
@@ -153,6 +154,7 @@ fun HomeScreen(onSignOut: () -> Unit) {
                         selectedTab = Tab.Home
                     }
                 }
+                Tab.Queue -> QueueScreen(session!!)
                 Tab.Reports -> ReportsScreen(session!!, today)
                 Tab.Admin -> AdminScreen(session = session!!, today = today)
                 Tab.Profile -> ProfileScreen(profile!!, session!!, isAdmin, onSignOut)

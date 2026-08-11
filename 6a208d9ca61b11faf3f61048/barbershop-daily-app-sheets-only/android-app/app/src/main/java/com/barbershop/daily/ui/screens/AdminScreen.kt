@@ -22,9 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.barbershop.daily.data.AttendanceEntry
 import com.barbershop.daily.data.Session
 import com.barbershop.daily.data.SheetsRepository
+import com.barbershop.daily.data.StaffUser
 import com.barbershop.daily.data.TodayData
 import com.barbershop.daily.data.TransactionEntry
 import kotlinx.coroutines.async
@@ -368,8 +368,9 @@ private fun WagesViewer(session: Session) {
 
         if (data != null) {
             val txs = data!!.transactions
-            val staffNames = listOf("Ng'ash", "Jay", "Esther", "Cate")
-            
+            val staffNames = data!!.attendance.map { it.name }.filter { it.isNotBlank() }
+                .ifEmpty { listOf("Ng'ash", "Jay", "Esther", "Cate") }
+
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 items(staffNames) { name ->
                     val isBarber = name.equals("Jay", ignoreCase = true) || name.equals("Ng'ash", ignoreCase = true)
@@ -529,6 +530,57 @@ private fun StaffManagement(session: Session, today: TodayData) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var loadingName by remember { mutableStateOf<String?>(null) }
+    var users by remember { mutableStateOf<List<StaffUser>>(emptyList()) }
+    var renameTarget by remember { mutableStateOf<StaffUser?>(null) }
+    var newName by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        try {
+            users = SheetsRepository.listUsers(session.token)
+        } catch (_: Throwable) {
+            users = today.attendance
+                .filter { it.name.isNotBlank() }
+                .map { StaffUser(name = it.name, role = "staff", active = it.isActive) }
+        }
+    }
+
+    if (renameTarget != null) {
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("Rename ${renameTarget?.name}") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("New name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newName.isNotBlank(),
+                    onClick = {
+                        val target = renameTarget!!
+                        val trimmed = newName.trim()
+                        renameTarget = null
+                        newName = ""
+                        scope.launch {
+                            try {
+                                SheetsRepository.renameUser(session.token, target.name, trimmed)
+                                users = SheetsRepository.listUsers(session.token)
+                                snackbar.showSnackbar("Renamed to $trimmed")
+                            } catch (t: Throwable) {
+                                snackbar.showSnackbar(t.message ?: "Rename failed")
+                            }
+                        }
+                    }
+                ) { Text("Rename") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text("Cancel") }
+            }
+        )
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) }
@@ -541,11 +593,11 @@ private fun StaffManagement(session: Session, today: TodayData) {
                 .verticalScroll(rememberScrollState())
         ) {
             Text("Staff Management", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
-            Text("Reset PINs or toggle account status", style = MaterialTheme.typography.bodyMedium)
-            
+            Text("Reset PINs, rename staff, or toggle account status", style = MaterialTheme.typography.bodyMedium)
+
             Spacer(Modifier.height(24.dp))
 
-            today.attendance.filter { it.name.isNotBlank() }.forEach { staff ->
+            users.forEach { staff ->
                 StaffAdminCard(
                     staff = staff,
                     isLoading = loadingName == staff.name,
@@ -554,12 +606,19 @@ private fun StaffManagement(session: Session, today: TodayData) {
                         scope.launch {
                             try {
                                 SheetsRepository.manageStaff(session.token, staff.name, action)
+                                users = SheetsRepository.listUsers(session.token)
                                 snackbar.showSnackbar("Success for ${staff.name}")
                             } catch (t: Throwable) {
                                 snackbar.showSnackbar(t.message ?: "Failed")
                             } finally {
                                 loadingName = null
                             }
+                        }
+                    },
+                    onRename = {
+                        if (staff.role != "admin") {
+                            newName = staff.name
+                            renameTarget = staff
                         }
                     }
                 )
@@ -570,14 +629,21 @@ private fun StaffManagement(session: Session, today: TodayData) {
 }
 
 @Composable
-private fun StaffAdminCard(staff: AttendanceEntry, isLoading: Boolean, onAction: (String) -> Unit) {
+private fun StaffAdminCard(staff: StaffUser, isLoading: Boolean, onAction: (String) -> Unit, onRename: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(staff.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Column {
+                    Text(staff.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (staff.role == "admin") "Admin" else "Staff",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
                 if (isLoading) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 }
@@ -591,20 +657,30 @@ private fun StaffAdminCard(staff: AttendanceEntry, isLoading: Boolean, onAction:
                 ) {
                     Text("Reset PIN", style = MaterialTheme.typography.labelSmall)
                 }
-                
+
                 Button(
-                    onClick = { onAction(if (staff.isActive) "suspend" else "recall") },
+                    onClick = { onAction(if (staff.active) "suspend" else "recall") },
                     modifier = Modifier.weight(1f),
                     enabled = !isLoading,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (staff.isActive) MaterialTheme.colorScheme.error else Color(0xFF39FF14) // Red for suspend, Green for recall
+                        containerColor = if (staff.active) MaterialTheme.colorScheme.error else Color(0xFF39FF14) // Red for suspend, Green for recall
                     )
                 ) {
                     Text(
-                        if (staff.isActive) "Suspend" else "Recall", 
+                        if (staff.active) "Suspend" else "Recall",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (staff.isActive) Color.White else Color.Black
+                        color = if (staff.active) Color.White else Color.Black
                     )
+                }
+            }
+            if (staff.role != "admin") {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onRename,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLoading
+                ) {
+                    Text("Rename", style = MaterialTheme.typography.labelSmall)
                 }
             }
         }

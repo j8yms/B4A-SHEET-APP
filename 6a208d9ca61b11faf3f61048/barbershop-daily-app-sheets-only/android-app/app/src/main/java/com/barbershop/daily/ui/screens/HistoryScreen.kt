@@ -34,16 +34,25 @@ fun getStaffColor(name: String): Color {
 
 @Composable
 fun HistoryScreen(
-    profile: UserProfile, 
-    session: Session, 
-    today: TodayData,
+    profile: UserProfile,
+    session: Session,
     onEdit: (TransactionEntry) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    var today by remember { mutableStateOf(TodayData()) }
     val txs = today.transactions
 
     var txToDelete by remember { mutableStateOf<TransactionEntry?>(null) }
+
+    // Poll today's records so deletes/edits appear immediately.
+    LaunchedEffect(session.token) {
+        SheetsRepository.pollEvery(
+            intervalMs = 5000,
+            fetch = { SheetsRepository.listToday(session.token) },
+            onValue = { today = it }
+        )
+    }
 
     if (txToDelete != null) {
         AlertDialog(
@@ -57,8 +66,15 @@ fun HistoryScreen(
                         txToDelete = null
                         scope.launch {
                             try {
-                                SheetsRepository.deleteTx(session.token, tx.txId)
+                                SheetsRepository.deleteTx(
+                                    token = session.token,
+                                    txId = tx.txId,
+                                    clientName = tx.clientName,
+                                    amount = tx.amount,
+                                    createdBy = tx.createdBy
+                                )
                                 snackbar.showSnackbar("Deleted record")
+                                today = SheetsRepository.listToday(session.token)
                             } catch (t: Throwable) {
                                 snackbar.showSnackbar(t.message ?: "Failed to delete")
                             }
@@ -80,7 +96,7 @@ fun HistoryScreen(
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Service History", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
         Text("Records for ${today.tabName}", style = MaterialTheme.typography.bodyMedium)
-        
+
         Spacer(Modifier.height(16.dp))
 
         if (txs.isEmpty()) {
@@ -103,7 +119,7 @@ fun HistoryScreen(
                 Spacer(Modifier.width(56.dp)) // space for actions
             }
             HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
-            
+
             LazyColumn(Modifier.fillMaxSize()) {
                 items(txs.reversed()) { tx ->
                     TransactionItem(
@@ -122,8 +138,8 @@ fun HistoryScreen(
 
 @Composable
 fun TransactionItem(
-    tx: TransactionEntry, 
-    canManage: Boolean, 
+    tx: TransactionEntry,
+    canManage: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -142,12 +158,12 @@ fun TransactionItem(
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = tx.servedBy,
+            text = if (tx.txType == "sale") tx.serviceType else tx.servedBy,
             modifier = Modifier.weight(0.8f),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            color = getStaffColor(tx.servedBy),
+            color = if (tx.txType == "sale") MaterialTheme.colorScheme.secondary else getStaffColor(tx.servedBy),
             fontWeight = FontWeight.Bold
         )
         Text(
@@ -177,7 +193,7 @@ fun TransactionItem(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        
+
         if (canManage) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 IconButton(

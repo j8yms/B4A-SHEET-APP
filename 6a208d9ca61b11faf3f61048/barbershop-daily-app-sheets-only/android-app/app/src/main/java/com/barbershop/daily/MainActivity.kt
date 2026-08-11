@@ -49,7 +49,7 @@ private fun AppRoot() {
         }
         composable("home") {
             HomeScreen(onSignOut = {
-                SessionStore.clear(context)
+                SessionStore.clearSession(context)
                 signedIn = false
             })
         }
