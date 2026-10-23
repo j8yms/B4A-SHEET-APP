@@ -36,7 +36,7 @@ const STAFF = [
 ];
 
 // Security constants
-const PIN_HASH_ITERATIONS = 100000;
+const PIN_HASH_ITERATIONS = 10000;
 const SESSION_TTL_HOURS = 12;
 const AUDIT_TAB = "__AUDIT__";
 const SESSIONS_TAB = "__SESSIONS__";
