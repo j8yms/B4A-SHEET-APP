@@ -51,7 +51,7 @@ function doPost(e) {
 
     switch (action) {
       case "bootstrap":
-        return ok_(bootstrap_(payload));
+        return ok_(bootstrap(payload));
       case "login":
         return ok_(login_(payload));
       case "logout":
@@ -491,7 +491,7 @@ function findUserRow_(name) {
   return null;
 }
 
-function bootstrap_(payload) {
+function bootstrap(payload) {
   // Creates admin tab and returns minimal public info for the app.
   // Staff list is public info needed for login screen.
   ensureAdminTab_();
