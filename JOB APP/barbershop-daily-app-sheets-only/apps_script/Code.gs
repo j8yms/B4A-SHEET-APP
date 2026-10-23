@@ -530,15 +530,19 @@ function login_(payload) {
   // Staff cannot login outside working hours; admins can login anytime.
   requireWithinHours_(role);
 
-  // First-time PIN provisioning: ONLY allowed if account was pre-provisioned by admin
-  // (indicated by a pre-set pinSalt). No salt = not provisioned = cannot claim.
+  // First-time PIN provisioning: allow self-provisioning if pinSalt is empty
   if (!pinSalt) {
-    throw new Error("Account not provisioned. Contact administrator for initial setup.");
-  }
-
-  // Verify PIN with salted hash
-  if (!verifyPin_(pin, pinHash, pinSalt)) {
-    throw new Error("Wrong PIN");
+    // Self-provision: set PIN hash and salt on first login
+    const newSalt = generateSalt_();
+    const newHash = hashPinWithSalt_(pin, newSalt);
+    u.sh.getRange(u.row, 3).setValue(newHash);  // pinHash
+    u.sh.getRange(u.row, 4).setValue(newSalt);  // pinSalt
+    writeAudit_(name, "SELF_PROVISION", name, "Self-provisioned PIN on first login", "");
+  } else {
+    // Verify PIN with salted hash
+    if (!verifyPin_(pin, pinHash, pinSalt)) {
+      throw new Error("Wrong PIN");
+    }
   }
 
   // Device lock:
