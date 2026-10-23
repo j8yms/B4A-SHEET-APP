@@ -513,7 +513,7 @@ function bootstrap(payload) {
 
 function login_(payload) {
   const name = String(payload.name || "").trim();
-  const pin = String(payload.pin || "");
+  const pin = String(payload.pin || "").trim();
   const deviceId = String(payload.deviceId || "").trim();
   if (!name || !pin || !deviceId) throw new Error("Missing name/pin/deviceId");
 
