@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 private val payMethods = listOf("Cash", "M-pesa", "Withdraw")
 private val statuses = listOf("Collected", "Pending")
 private val serviceTypes = listOf("Shave", "Dye", "Blow-dry", "Manicure", "Pedicure", "Other")
-private val fallbackStaff = listOf("Ng'ash", "Jay", "Esther", "Cate")
+private val fallbackStaff = listOf("Ng'ash", "Jay", "Esther")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

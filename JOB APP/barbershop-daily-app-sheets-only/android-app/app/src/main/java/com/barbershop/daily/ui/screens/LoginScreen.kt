@@ -53,8 +53,7 @@ private val brandColors = listOf(
 private val defaultStaff = listOf(
     StaffOption("Ng'ash", "NG", Color(0xFFE91E63)),
     StaffOption("Jay", "JA", Color(0xFF39FF14)),
-    StaffOption("Esther", "ES", Color(0xFF6200EA)),
-    StaffOption("Cate", "CA", Color(0xFFFF5722))
+    StaffOption("Esther", "ES", Color(0xFF6200EA))
 )
 
 private fun initialsFor(name: String): String =
@@ -65,8 +64,7 @@ private fun colorFor(name: String, index: Int): Color {
     val known = mapOf(
         "Ng'ash" to Color(0xFFE91E63),
         "Jay" to Color(0xFF39FF14),
-        "Esther" to Color(0xFF6200EA),
-        "Cate" to Color(0xFFFF5722)
+        "Esther" to Color(0xFF6200EA)
     )
     known[name]?.let { return it }
     val hash = name.hashCode()

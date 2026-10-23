@@ -33,13 +33,10 @@ const STAFF = [
   { name: "Ng'ash", role: "admin" },
   { name: "Jay", role: "admin" },
   { name: "Esther", role: "staff" },
-  { name: "Cate", role: "staff" },
 ];
 
 // Security constants
 const PIN_HASH_ITERATIONS = 100000;
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOGIN_LOCKOUT_MINUTES = 15;
 const SESSION_TTL_HOURS = 12;
 const AUDIT_TAB = "__AUDIT__";
 const SESSIONS_TAB = "__SESSIONS__";
@@ -249,7 +246,8 @@ function ensureAdminTab_() {
   // Layout:
   // A1:I1 = USERS header
   // A2:I? = users table
-  // Columns: name | role | pinHash | pinSalt | maxDevices | deviceIds (comma) | active | failedAttempts | lockedUntil
+  // Columns: name | role | pinHash | pinSalt | maxDevices | deviceIds | active | failedAttempts | lockedUntil
+  // Index:   0      1       2        3           4           5          6       7             8
   if (sh.getRange("A1").getValue() !== "USERS") {
     sh.clear();
     sh.getRange("A1").setValue("USERS");
@@ -260,7 +258,7 @@ function ensureAdminTab_() {
 
     sh.getRange("K1").setValue("SETTINGS");
     sh.getRange("K2:L2").setValues([["key", "value"]]);
-    sh.getRange("K3:L9").setValues([
+    sh.getRange("K3:K9").setValues([
       ["graceMinutes", 15],
       ["closeTime", "21:00"],
       ["weekdayStart", "08:00"],
@@ -270,20 +268,36 @@ function ensureAdminTab_() {
       ["queueSheetId", ""],
     ]);
   } else {
-    // Migration: add pinSalt, failedAttempts, lockedUntil columns if missing
+    // Migration: ensure columns match expected layout (9 columns)
     const header = sh.getRange("A2:I2").getValues()[0];
-    if (String(header[3] || "").trim() !== "pinSalt") {
-      sh.getRange("D2").setValue("pinSalt");
+    // Check if deviceIds column exists at index 5
+    if (String(header[5] || "").trim().toLowerCase() !== "deviceids") {
+      // Insert deviceIds column at index 5
+      sh.insertColumnBefore(6); // Column F (index 5)
+      sh.getRange("F2").setValue("deviceIds");
+      // Shift existing columns right
+    }
+    // Ensure active is at index 6
+    if (String(header[6] || "").trim().toLowerCase() !== "active") {
+      sh.getRange("G2").setValue("active");
+    }
+    // Ensure failedAttempts at index 7
+    if (String(header[7] || "").trim().toLowerCase() !== "failedattempts") {
       sh.getRange("H2").setValue("failedAttempts");
+    }
+    // Ensure lockedUntil at index 8
+    if (String(header[8] || "").trim().toLowerCase() !== "lockeduntil") {
       sh.getRange("I2").setValue("lockedUntil");
-      const last = sh.getLastRow();
-      if (last >= 3) {
-        const existing = sh.getRange(3, 1, last - 2, 9).getValues();
-        for (let i = 0; i < existing.length; i++) {
-          if (!existing[i][3]) sh.getRange(3 + i, 4).setValue(""); // pinSalt
-          if (existing[i][7] === undefined) sh.getRange(3 + i, 8).setValue(0); // failedAttempts
-          if (existing[i][8] === undefined) sh.getRange(3 + i, 9).setValue(""); // lockedUntil
+    }
+    const last = sh.getLastRow();
+    if (last >= 3) {
+      const existing = sh.getRange(3, 1, last - 2, 9).getValues();
+      for (let i = 0; i < existing.length; i++) {
+        if (existing[i][6] === undefined || existing[i][6] === "") {
+          sh.getRange(3 + i, 7).setValue(true); // default active = true
         }
+        if (existing[i][7] === undefined) sh.getRange(3 + i, 8).setValue(0); // failedAttempts
+        if (existing[i][8] === undefined) sh.getRange(3 + i, 9).setValue(""); // lockedUntil
       }
     }
   }
@@ -470,7 +484,7 @@ function readSettings_() {
 function findUserRow_(name) {
   const sh = ensureAdminTab_();
   const last = sh.getLastRow();
-  const data = sh.getRange(3, 1, Math.max(0, last - 2), 9).getValues(); // start row 3
+  const data = sh.getRange(3, 1, Math.max(0, last - 2), 9).getValues(); // start row 3, 9 columns
   for (let i = 0; i < data.length; i++) {
     if (String(data[i][0]).trim() === name) return { sh: sh, row: 3 + i, data: data[i] };
   }
@@ -479,7 +493,7 @@ function findUserRow_(name) {
 
 function bootstrap_(payload) {
   // Creates admin tab and returns minimal public info for the app.
-  // Does NOT expose staff list or sensitive settings before authentication.
+  // Staff list is public info needed for login screen.
   ensureAdminTab_();
   const settings = readSettings_();
   const publicSettings = {
@@ -493,6 +507,7 @@ function bootstrap_(payload) {
   return {
     todayTab: todayTabName_(),
     settings: publicSettings,
+    staff: getUsers_().map(u => ({ name: u.name, role: u.role })),
   };
 }
 
@@ -510,23 +525,7 @@ function login_(payload) {
   const maxDevices = Number(u.data[4] || (role === "admin" ? 2 : 1));
   const deviceIds = String(u.data[5] || "").split(",").map(s => s.trim()).filter(Boolean);
   const active = Boolean(u.data[6]);
-  const failedAttempts = Number(u.data[7] || 0);
-  const lockedUntil = String(u.data[8] || "");
   if (!active) throw new Error("User is inactive");
-
-  // Check account lockout
-  const nowMs = Date.now();
-  if (lockedUntil) {
-    const lockMs = parseInt(lockedUntil, 10);
-    if (!isNaN(lockMs) && nowMs < lockMs) {
-      const remaining = Math.ceil((lockMs - nowMs) / 60000);
-      throw new Error(`Account temporarily locked. Try again in ${remaining} minute(s).`);
-    } else if (nowMs >= lockMs) {
-      // Lock expired, reset failed attempts
-      u.sh.getRange(u.row, 8).setValue(0);
-      u.sh.getRange(u.row, 9).setValue("");
-    }
-  }
 
   // Staff cannot login outside working hours; admins can login anytime.
   requireWithinHours_(role);
@@ -539,21 +538,7 @@ function login_(payload) {
 
   // Verify PIN with salted hash
   if (!verifyPin_(pin, pinHash, pinSalt)) {
-    // Increment failed attempts
-    const newFailed = failedAttempts + 1;
-    u.sh.getRange(u.row, 8).setValue(newFailed);
-    if (newFailed >= MAX_LOGIN_ATTEMPTS) {
-      const lockMs = nowMs + LOGIN_LOCKOUT_MINUTES * 60 * 1000;
-      u.sh.getRange(u.row, 9).setValue(lockMs.toString());
-      throw new Error(`Too many failed attempts. Account locked for ${LOGIN_LOCKOUT_MINUTES} minutes.`);
-    }
     throw new Error("Wrong PIN");
-  }
-
-  // Success: reset failed attempts
-  if (failedAttempts > 0) {
-    u.sh.getRange(u.row, 8).setValue(0);
-    u.sh.getRange(u.row, 9).setValue("");
   }
 
   // Device lock:
@@ -739,38 +724,57 @@ function listToday_(payload) {
   // Attendance
   const attendance = readAttendance_(sh);
 
-  // Transactions
+  // Transactions - dynamically find column indices from header row
   const startRow = txTableStartRow_(sh);
   const headerRow = startRow + 1;
   const dataStart = headerRow + 1;
   const lastRow = sh.getLastRow();
   const rowCount = Math.max(0, lastRow - dataStart + 1);
-  const rows = rowCount ? sh.getRange(dataStart, 1, rowCount, 15).getValues() : [];
+  if (rowCount === 0) {
+    return { tabName: tabName, role: sess.role, me: sess.name, attendance: attendance, transactions: [] };
+  }
 
+  // Read header row to map column names to indices (case-insensitive, space-tolerant)
+  const headers = sh.getRange(headerRow, 1, 1, 15).getValues()[0];
+  const colIndex = {};
+  headers.forEach((h, i) => {
+    const key = String(h || "").trim().toLowerCase().replace(/\s+/g, "");
+    if (key) colIndex[key] = i;
+  });
+
+  // Helper to get value by flexible column name
+  const getCol = (row, names) => {
+    for (const n of names) {
+      const idx = colIndex[n.toLowerCase().replace(/\s+/g, "")];
+      if (idx !== undefined) return String(row[idx] || "");
+    }
+    return "";
+  };
+
+  const rows = sh.getRange(dataStart, 1, rowCount, 15).getValues();
   const tx = [];
   rows.forEach(r => {
-    const sn = r[0];
-    const name = String(r[1] || "");
-    const amount = r[2];
-    const serviceType = String(r[3] || "");
-    const servedBy = String(r[4] || "");
-    const groomedBy = String(r[5] || "");
-    const payMethod = String(r[6] || "");
-    const status = String(r[7] || "");
-    const mpesaTo = String(r[8] || "");
-    const lastEditor = String(r[9] || "");
-    const txId = String(r[10] || "");
-    const createdBy = String(r[11] || "");
-    const deviceId = String(r[12] || "");
-    const createdAt = String(r[13] || "");
-    const txType = String(r[14] || "service");
+    const name = getCol(r, ["name", "clientname", "client"]);
+    const amount = getCol(r, ["amount", "amt"]);
+    const serviceType = getCol(r, ["servicetype", "service", "itemname", "item"]);
+    const servedBy = getCol(r, ["servedby", "barber", "stylist"]);
+    const groomedBy = getCol(r, ["groomedby", "groomer", "shampoogirl"]);
+    const payMethod = getCol(r, ["paymethod", "paymentmethod", "method"]);
+    const status = getCol(r, ["status", "state"]);
+    const mpesaTo = getCol(r, ["mpesato", "mpesa"]);
+    const lastEditor = getCol(r, ["lasteditor", "last editor", "editor"]);
+    const txId = getCol(r, ["txid", "id"]);
+    const createdBy = getCol(r, ["createdby", "creator"]);
+    const deviceId = getCol(r, ["deviceid", "device"]);
+    const createdAt = getCol(r, ["createdat", "created", "timestamp"]);
+    const txType = getCol(r, ["txtype", "type"]);
 
-    // Stop at first fully empty row (common in sheets)
+    // Stop at first fully empty row
     if (!name && !amount && !servedBy && !payMethod && !status && !mpesaTo) return;
 
     tx.push({
       txId: txId,
-      sn: sn,
+      sn: getCol(r, ["s/n", "sn", "no"]),
       clientName: name,
       amount: Number(amount || 0),
       serviceType: serviceType,
@@ -783,11 +787,10 @@ function listToday_(payload) {
       createdBy: createdBy,
       deviceId: deviceId,
       createdAt: createdAt,
-      txType: txType
+      txType: txType || "service"
     });
   });
 
-  // Staff only sees today (this endpoint only returns today anyway)
   return { tabName: tabName, role: sess.role, me: sess.name, attendance: attendance, transactions: tx };
 }
 
@@ -1010,6 +1013,7 @@ function adminListDay_(payload) {
   // Reuse list logic but for a given tab
   const attendance = readAttendance_(sh);
 
+  // Dynamically find column indices from header row (same logic as listToday_)
   const startRow = (() => {
     const vals = sh.getRange(1, 1, sh.getLastRow(), 1).getValues();
     for (let r = 1; r <= vals.length; r++) {
@@ -1019,29 +1023,53 @@ function adminListDay_(payload) {
     return 3 + staffCount_() + 2;
   })();
 
-  const dataStart = startRow + 3;
+  const headerRow = startRow + 1;
+  const dataStart = headerRow + 1;
   const lastRow = sh.getLastRow();
   const rowCount = Math.max(0, lastRow - dataStart + 1);
-  const rows = rowCount ? sh.getRange(dataStart, 1, rowCount, 15).getValues() : [];
+  if (rowCount === 0) {
+    return { tabName: dayTab, role: sess.role, me: sess.name, attendance: attendance, transactions: [] };
+  }
+
+  // Read header row to map column names to indices
+  const headers = sh.getRange(headerRow, 1, 1, 15).getValues()[0];
+  const colIndex = {};
+  headers.forEach((h, i) => {
+    const key = String(h || "").trim().toLowerCase().replace(/\s+/g, "");
+    if (key) colIndex[key] = i;
+  });
+
+  const getCol = (row, names) => {
+    for (const n of names) {
+      const idx = colIndex[n.toLowerCase().replace(/\s+/g, "")];
+      if (idx !== undefined) return String(row[idx] || "");
+    }
+    return "";
+  };
+
+  const rows = sh.getRange(dataStart, 1, rowCount, 15).getValues();
   const tx = [];
   rows.forEach(r => {
-    const name = String(r[1] || "");
-    const amount = r[2];
-    const serviceType = String(r[3] || "");
-    const servedBy = String(r[4] || "");
-    const groomedBy = String(r[5] || "");
-    const payMethod = String(r[6] || "");
-    const status = String(r[7] || "");
-    const mpesaTo = String(r[8] || "");
-    const lastEditor = String(r[9] || "");
-    const txId = String(r[10] || "");
-    const createdBy = String(r[11] || "");
-    const deviceId = String(r[12] || "");
-    const createdAt = String(r[13] || "");
-    const txType = String(r[14] || "service");
+    const name = getCol(r, ["name", "clientname", "client"]);
+    const amount = getCol(r, ["amount", "amt"]);
+    const serviceType = getCol(r, ["servicetype", "service", "itemname", "item"]);
+    const servedBy = getCol(r, ["servedby", "barber", "stylist"]);
+    const groomedBy = getCol(r, ["groomedby", "groomer", "shampoogirl"]);
+    const payMethod = getCol(r, ["paymethod", "paymentmethod", "method"]);
+    const status = getCol(r, ["status", "state"]);
+    const mpesaTo = getCol(r, ["mpesato", "mpesa"]);
+    const lastEditor = getCol(r, ["lasteditor", "last editor", "editor"]);
+    const txId = getCol(r, ["txid", "id"]);
+    const createdBy = getCol(r, ["createdby", "creator"]);
+    const deviceId = getCol(r, ["deviceid", "device"]);
+    const createdAt = getCol(r, ["createdat", "created", "timestamp"]);
+    const txType = getCol(r, ["txtype", "type"]);
+
     if (!name && !amount && !servedBy && !payMethod && !status && !mpesaTo) return;
+
     tx.push({
       txId: txId,
+      sn: getCol(r, ["s/n", "sn", "no"]),
       clientName: name,
       amount: Number(amount || 0),
       serviceType: serviceType,
@@ -1054,7 +1082,7 @@ function adminListDay_(payload) {
       createdBy: createdBy,
       deviceId: deviceId,
       createdAt: createdAt,
-      txType: txType
+      txType: txType || "service"
     });
   });
 
@@ -1099,12 +1127,12 @@ function manageStaff_(payload) {
     u.sh.getRange(u.row, 4).setValue(newSalt);
     writeAudit_(sess.name, "PROVISION", name, "Initial PIN provisioned by admin", "");
   } else if (action === "suspend") {
-    u.sh.getRange(u.row, 7).setValue(false);
+    u.sh.getRange(u.row, 7).setValue(false); // active is at index 6 (column G)
     // Revoke all sessions for suspended user
     revokeAllUserSessions_(name);
     writeAudit_(sess.name, "SUSPEND", name, "Account suspended by admin", "");
   } else if (action === "recall") {
-    u.sh.getRange(u.row, 7).setValue(true);
+    u.sh.getRange(u.row, 7).setValue(true); // active is at index 6 (column G)
     writeAudit_(sess.name, "RECALL", name, "Account reactivated by admin", "");
   } else {
     throw new Error("Unknown staff action");

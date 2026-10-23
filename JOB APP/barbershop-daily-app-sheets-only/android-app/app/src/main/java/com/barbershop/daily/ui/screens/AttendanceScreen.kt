@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.TimeZone
 
-private val allStaffNames = listOf("Ng'ash", "Jay", "Esther", "Cate")
+private val fallbackStaff = listOf("Ng'ash", "Jay", "Esther")
 
 @Composable
 fun AttendanceScreen(profile: UserProfile, session: Session) {
@@ -66,7 +66,7 @@ fun AttendanceScreen(profile: UserProfile, session: Session) {
         Spacer(Modifier.height(8.dp))
 
         LazyColumn(Modifier.weight(1f)) {
-            items(allStaffNames) { name ->
+            items(fallbackStaff) { name ->
                 val entry: AttendanceEntry? = byName[name]
                 val status = when {
                     entry != null -> entry.arrival.ifBlank { "IN" }

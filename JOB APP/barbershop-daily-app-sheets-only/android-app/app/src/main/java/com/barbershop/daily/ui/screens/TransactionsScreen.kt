@@ -20,8 +20,8 @@ import kotlinx.coroutines.launch
 private val payMethods = listOf("Cash", "M-pesa", "Withdraw")
 private val statuses = listOf("Collected", "Pending")
 private val mpesaToOptions = listOf("", "Nash", "JAY")
-private val servedByOptions = listOf("Ng'ash", "Jay", "Esther", "Cate")
-private val groomedByOptions = listOf("None", "Esther", "Cate", "Ng'ash", "Jay")
+private val servedByOptions = listOf("Ng'ash", "Jay", "Esther")
+private val groomedByOptions = listOf("None", "Esther", "Ng'ash", "Jay")
 private val serviceTypes = listOf("Shave", "Dye", "Blow-dry", "Manicure", "Pedicure", "Other")
 
 @Composable
@@ -279,9 +279,6 @@ private fun TransactionRow(
             Text("Pay: ${tx.payMethod} | Status: ${tx.status} | Mpesa to: ${tx.mpesaTo}")
             if (tx.createdBy.isNotBlank()) Text("By: ${tx.createdBy}", style = MaterialTheme.typography.bodySmall)
             if (tx.lastEditor.isNotBlank()) Text(tx.lastEditor, style = MaterialTheme.typography.bodySmall)
-            if (tx.createdAt.isNotBlank()) {
-                Text("Created: ${formatTimestamp(tx.createdAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-            }
 
             if (canEdit) {
                 Spacer(Modifier.height(8.dp))
@@ -292,27 +289,6 @@ private fun TransactionRow(
             }
         }
     }
-}
-
-private fun formatTimestamp(iso: String): String {
-    // Input format: "yyyy-MM-dd HH:mm:ss" in Africa/Nairobi
-    // Display format: "19 Oct 2026, 08:42"
-    try {
-        val parts = iso.split(" ")
-        if (parts.size >= 2) {
-            val datePart = parts[0]
-            val timePart = parts[1].substring(0, 5) // HH:mm
-            val dateParts = datePart.split("-")
-            if (dateParts.size == 3) {
-                val year = dateParts[0]
-                val month = dateParts[1].toIntOrNull() ?: 1
-                val day = dateParts[2].toIntOrNull() ?: 1
-                val monthNames = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-                return "${day} ${monthNames[month - 1]} $year, $timePart"
-            }
-        }
-    } catch (_: Throwable) {}
-    return iso // fallback
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -26,7 +26,6 @@ val staffColors = mapOf(
     "Ng'ash" to Color(0xFFE91E63), // Pink
     "Jay" to Color(0xFF39FF14),     // Neon Green
     "Esther" to Color(0xFF6200EA), // Deep Purple
-    "Cate" to Color(0xFFFF5722),   // Orange
 )
 
 fun getStaffColor(name: String): Color {
@@ -148,16 +147,39 @@ fun TransactionItem(
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            verticalAlignment = androidx.compose.ui.Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = tx.clientName,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            // Client name with time as subscript (matching Admin screen pattern)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = tx.clientName,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val timeText = if (tx.createdAt.isNotBlank()) {
+                    formatTimeOnly(tx.createdAt)
+                } else if (tx.lastEditor.isNotBlank()) {
+                    extractTimeFromLastEditor(tx.lastEditor)
+                } else ""
+                if (timeText.isNotBlank()) {
+                    Text(
+                        text = "⏱ $timeText",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF39FF14),
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    // Debug: show if no time data available
+                    Text(
+                        text = "⏱ NO TIME",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
             Text(
                 text = if (tx.txType == "sale") tx.serviceType else tx.servedBy,
                 modifier = Modifier.weight(0.8f),
@@ -224,49 +246,50 @@ fun TransactionItem(
                 Spacer(Modifier.width(52.dp))
             }
         }
-
-        // Timestamp row
-        if (tx.createdAt.isNotBlank() || tx.lastEditor.isNotBlank()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (tx.createdAt.isNotBlank()) {
-                    Text(
-                        text = "Created: ${formatTimestamp(tx.createdAt)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-                if (tx.lastEditor.isNotBlank()) {
-                    Text(
-                        text = tx.lastEditor,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-            }
-        }
     }
 }
 
-private fun formatTimestamp(iso: String): String {
+private fun formatTimeOnly(iso: String): String {
     // Input format: "yyyy-MM-dd HH:mm:ss" in Africa/Nairobi
-    // Display format: "19 Oct 2026, 08:42"
+    // Display format: "13:25" (just time)
     try {
         val parts = iso.split(" ")
         if (parts.size >= 2) {
-            val datePart = parts[0]
-            val timePart = parts[1].substring(0, 5) // HH:mm
-            val dateParts = datePart.split("-")
-            if (dateParts.size == 3) {
-                val year = dateParts[0]
-                val month = dateParts[1].toIntOrNull() ?: 1
-                val day = dateParts[2].toIntOrNull() ?: 1
-                val monthNames = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-                return "${day} ${monthNames[month - 1]} $year, $timePart"
+            return parts[1].substring(0, 5) // HH:mm
+        }
+    } catch (_: Throwable) {}
+    return ""
+}
+
+private fun extractTimeFromLastEditor(lastEditor: String): String {
+    // Formats supported:
+    // "HH:mm - Name" (hyphen format, e.g., "05:22 - Jay")
+    // "HH:mm:ss Name" or "HH:mm:ss service" (space-separated)
+    // Handles different dash characters (hyphen, en-dash, em-dash)
+    try {
+        // First try dash/hyphen format: "HH:mm - Name"
+        // Handle regular hyphen, en-dash (–), em-dash (—)
+        val dashChars = "-–—"
+        for (dash in dashChars) {
+            if (lastEditor.contains(dash)) {
+                val parts = lastEditor.split(dash)
+                if (parts.size >= 1) {
+                    val timePart = parts[0].trim()
+                    if (timePart.contains(":")) {
+                        // Handle both HH:mm and HH:mm:ss
+                        return timePart.substring(0, minOf(5, timePart.length))
+                    }
+                }
+            }
+        }
+        // Fallback: space-separated "HH:mm:ss Name" or "HH:mm:ss service"
+        val parts = lastEditor.trim().split("\\s+".toRegex())
+        if (parts.size >= 1) {
+            val timePart = parts[0]
+            if (timePart.contains(":")) {
+                return timePart.substring(0, minOf(5, timePart.length)) // HH:mm
             }
         }
     } catch (_: Throwable) {}
-    return iso // fallback
+    return ""
 }

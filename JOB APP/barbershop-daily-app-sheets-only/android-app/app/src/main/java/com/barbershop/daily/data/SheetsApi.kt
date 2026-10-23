@@ -15,7 +15,7 @@ object SheetsApi {
      * Paste your Apps Script Web App URL here after you deploy it.
      * Example: https://script.google.com/macros/s/XXXX/exec
      */
-    const val APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbztlhqgyHIz_FCKFiqifJi6BFUetrLaNQAtXR9Q9RhuJg6jq65xjPcpvtSMXmqL-jLF/exec"
+    const val APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyeg8-oHqNrQxeM5dTRuHLtHYcjjAyAc3x7s2wRnn_c_zM_FCjW0M388h3H3J6VkScm/exec"
 
     private const val TAG = "SheetsApi"
 
@@ -25,8 +25,8 @@ object SheetsApi {
             requestMethod = "POST"
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            connectTimeout = 15000
-            readTimeout = 20000
+            connectTimeout = 30000
+            readTimeout = 60000
         }
 
         val body = JSONObject()

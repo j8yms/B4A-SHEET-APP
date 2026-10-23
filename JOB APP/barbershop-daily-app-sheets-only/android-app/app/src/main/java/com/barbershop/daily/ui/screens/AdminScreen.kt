@@ -369,12 +369,19 @@ private fun WagesViewer(session: Session) {
         if (data != null) {
             val txs = data!!.transactions
             val staffNames = data!!.attendance.map { it.name }.filter { it.isNotBlank() }
-                .ifEmpty { listOf("Ng'ash", "Jay", "Esther", "Cate") }
+                .ifEmpty { listOf("Ng'ash", "Jay", "Esther") }
+
+            // Determine groomers dynamically from today's transactions
+            val groomerNames = txs
+                .filter { it.groomedBy.isNotBlank() && it.groomedBy != "None" }
+                .map { it.groomedBy }
+                .distinct()
+                .toSet()
 
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 items(staffNames) { name ->
                     val isBarber = name.equals("Jay", ignoreCase = true) || name.equals("Ng'ash", ignoreCase = true)
-                    val isGroomer = name.equals("Cate", ignoreCase = true) || name.equals("Esther", ignoreCase = true)
+                    val isGroomer = groomerNames.contains(name)
                     
                     // Money sent to them (M-Pesa recipient)
                     val moneySent = txs.filter { it.mpesaTo.equals(name, ignoreCase = true) }.sumOf { it.amount }
