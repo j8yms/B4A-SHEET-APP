@@ -36,7 +36,7 @@ const STAFF = [
 ];
 
 // Security constants
-const PIN_HASH_ITERATIONS = 100000;
+const PIN_HASH_ITERATIONS = 1000;
 const SESSION_TTL_HOURS = 12;
 const AUDIT_TAB = "__AUDIT__";
 const SESSIONS_TAB = "__SESSIONS__";
@@ -195,11 +195,15 @@ function getKenyaHolidays_(year) {
 }
 
 function isKenyaHolidayToday_() {
-  const d = now_();
-  const year = Number(Utilities.formatDate(d, TZ, "yyyy"));
-  const iso = Utilities.formatDate(d, TZ, "yyyy-MM-dd");
-  const dates = getKenyaHolidays_(year);
-  return dates.indexOf(iso) >= 0;
+  try {
+    const d = now_();
+    const year = Number(Utilities.formatDate(d, TZ, "yyyy"));
+    const iso = Utilities.formatDate(d, TZ, "yyyy-MM-dd");
+    const dates = getKenyaHolidays_(year);
+    return dates.indexOf(iso) >= 0;
+  } catch (e) {
+    return false;
+  }
 }
 
 function getStartTimeForToday_() {
@@ -258,7 +262,7 @@ function ensureAdminTab_() {
 
     sh.getRange("K1").setValue("SETTINGS");
     sh.getRange("K2:L2").setValues([["key", "value"]]);
-    sh.getRange("K3:K9").setValues([
+    sh.getRange("K3:L9").setValues([
       ["graceMinutes", 15],
       ["closeTime", "21:00"],
       ["weekdayStart", "08:00"],
@@ -375,7 +379,7 @@ function incrementSessionVersion_(token) {
   const tokens = sh.getRange(2, 1, last - 1, 1).getValues();
   for (let i = 0; i < tokens.length; i++) {
     if (String(tokens[i][0]) === token) {
-      const currentVersion = Number(data[i][5] || 1);
+      const currentVersion = Number(sh.getRange(2 + i, 6).getValue() || 1);
       sh.getRange(2 + i, 6).setValue(currentVersion + 1);
       break;
     }
@@ -445,25 +449,47 @@ function sanitizeForSheets_(value) {
   return str;
 }
 
+function getAdminTableMap_(sh) {
+  if (!sh) sh = ensureAdminTab_();
+  const lastCol = Math.max(9, sh.getLastColumn());
+  const headers = sh.getRange(2, 1, 1, lastCol).getValues()[0];
+  const colIndex = {};
+  headers.forEach((h, i) => {
+    const k = String(h || "").trim().toLowerCase().replace(/\s+/g, "");
+    if (k) colIndex[k] = i;
+  });
+  return colIndex;
+}
+
 function getUsers_() {
   const sh = ensureAdminTab_();
   const last = sh.getLastRow();
   if (last < 3) return [];
-  const data = sh.getRange(3, 1, last - 2, 9).getValues();
+  const colIndex = getAdminTableMap_(sh);
+  const getVal = (r, key, def = "") => {
+    const idx = colIndex[key.toLowerCase()];
+    return idx !== undefined ? r[idx] : def;
+  };
+
+  const numCols = Math.max(9, sh.getLastColumn());
+  const data = sh.getRange(3, 1, last - 2, numCols).getValues();
   const users = [];
   data.forEach(r => {
-    const name = String(r[0]).trim();
+    const name = String(getVal(r, "name", "")).trim();
     if (!name) return;
+    const role = String(getVal(r, "role", "staff"));
+    const activeVal = getVal(r, "active", true);
+    const active = activeVal !== false && String(activeVal).toLowerCase() !== "false";
     users.push({
       name: name,
-      role: String(r[1] || "staff"),
-      pinHash: String(r[2] || ""),
-      pinSalt: String(r[3] || ""),
-      maxDevices: Number(r[4] || (String(r[1]) === "admin" ? 2 : 1)),
-      deviceIds: String(r[5] || "").split(",").map(s => s.trim()).filter(Boolean),
-      active: Boolean(r[6]),
-      failedAttempts: Number(r[7] || 0),
-      lockedUntil: String(r[8] || ""),
+      role: role,
+      pinHash: String(getVal(r, "pinhash", "")),
+      pinSalt: String(getVal(r, "pinsalt", "")),
+      maxDevices: Number(getVal(r, "maxdevices", role === "admin" || role === "superAdmin" ? 2 : 1)),
+      deviceIds: String(getVal(r, "deviceids", "")).split(",").map(s => s.trim()).filter(Boolean),
+      active: active,
+      failedAttempts: Number(getVal(r, "failedattempts", 0)),
+      lockedUntil: String(getVal(r, "lockeduntil", "")),
     });
   });
   return users;
@@ -475,18 +501,24 @@ function staffCount_() {
 
 function readSettings_() {
   const sh = ensureAdminTab_();
-  const values = sh.getRange("H3:I50").getValues().filter(r => String(r[0]).trim() !== "");
+  const values = sh.getRange("K3:L50").getValues().filter(r => String(r[0]).trim() !== "");
   const settings = {};
   values.forEach(r => settings[String(r[0])] = r[1]);
   return settings;
 }
 
-function findUserRow_(name) {
-  const sh = ensureAdminTab_();
+function findUserRow_(name, sh) {
+  if (!sh) sh = ensureAdminTab_();
   const last = sh.getLastRow();
-  const data = sh.getRange(3, 1, Math.max(0, last - 2), 9).getValues(); // start row 3, 9 columns
+  if (last < 3) return null;
+  const colIndex = getAdminTableMap_(sh);
+  const nameIdx = colIndex["name"] !== undefined ? colIndex["name"] : 0;
+  const numCols = Math.max(9, sh.getLastColumn());
+  const data = sh.getRange(3, 1, last - 2, numCols).getValues();
   for (let i = 0; i < data.length; i++) {
-    if (String(data[i][0]).trim() === name) return { sh: sh, row: 3 + i, data: data[i] };
+    if (String(data[i][nameIdx]).trim() === name) {
+      return { sh: sh, row: 3 + i, data: data[i], colIndex: colIndex };
+    }
   }
   return null;
 }
@@ -517,27 +549,39 @@ function login_(payload) {
   const deviceId = String(payload.deviceId || "").trim();
   if (!name || !pin || !deviceId) throw new Error("Missing name/pin/deviceId");
 
-  const u = findUserRow_(name);
+  const sh = ensureAdminTab_();
+  const u = findUserRow_(name, sh);
   if (!u) throw new Error("Unknown user");
-  const role = String(u.data[1]);
-  const pinHash = String(u.data[2] || "");
-  const pinSalt = String(u.data[3] || "");
-  const maxDevices = Number(u.data[4] || (role === "admin" ? 2 : 1));
-  const deviceIds = String(u.data[5] || "").split(",").map(s => s.trim()).filter(Boolean);
-  const active = Boolean(u.data[6]);
+
+  const colIndex = u.colIndex;
+  const getVal = (key, def = "") => {
+    const idx = colIndex[key.toLowerCase()];
+    return idx !== undefined ? u.data[idx] : def;
+  };
+  const getColNum = (key, fallbackCol) => {
+    const idx = colIndex[key.toLowerCase()];
+    return idx !== undefined ? idx + 1 : fallbackCol;
+  };
+
+  const role = String(getVal("role", "staff"));
+  const pinHash = String(getVal("pinhash", "")).trim();
+  const pinSalt = String(getVal("pinsalt", "")).trim();
+  const maxDevices = Number(getVal("maxdevices", role === "admin" || role === "superAdmin" ? 2 : 1));
+  const deviceIds = String(getVal("deviceids", "")).split(",").map(s => s.trim()).filter(Boolean);
+  const activeVal = getVal("active", true);
+  const active = activeVal !== false && String(activeVal).toLowerCase() !== "false";
   if (!active) throw new Error("User is inactive");
 
   // Staff cannot login outside working hours; admins can login anytime.
   requireWithinHours_(role);
 
-  // First-time PIN provisioning: allow self-provisioning if pinSalt is empty
-  if (!pinSalt) {
-    // Self-provision: set PIN hash and salt on first login
+  // First-time PIN provisioning: allow self-provisioning if either pinHash or pinSalt is empty
+  if (!pinHash || !pinSalt) {
     const newSalt = generateSalt_();
     const newHash = hashPinWithSalt_(pin, newSalt);
-    u.sh.getRange(u.row, 3).setValue(newHash);  // pinHash
-    u.sh.getRange(u.row, 4).setValue(newSalt);  // pinSalt
-    writeAudit_(name, "SELF_PROVISION", name, "Self-provisioned PIN on first login", "");
+    sh.getRange(u.row, getColNum("pinhash", 3)).setValue(newHash);  // pinHash
+    sh.getRange(u.row, getColNum("pinsalt", 4)).setValue(newSalt);  // pinSalt
+    writeAudit_(name, "SELF_PROVISION", name, "Provisioned PIN on login", "");
   } else {
     // Verify PIN with salted hash
     if (!verifyPin_(pin, pinHash, pinSalt)) {
@@ -548,8 +592,8 @@ function login_(payload) {
   // Device lock:
   const unique = deviceIds.indexOf(deviceId) >= 0 ? deviceIds : deviceIds.concat([deviceId]);
   if (unique.length > maxDevices) throw new Error("Device limit reached for this user");
-  u.sh.getRange(u.row, 5).setValue(maxDevices);
-  u.sh.getRange(u.row, 6).setValue(unique.join(","));
+  sh.getRange(u.row, getColNum("maxdevices", 5)).setValue(maxDevices);
+  sh.getRange(u.row, getColNum("deviceids", 6)).setValue(unique.join(","));
 
   // Create session token (cache, 12 hours)
   const token = Utilities.getUuid();
@@ -607,16 +651,6 @@ function listStaff_(payload) {
   return { staff: getUsers_().map(u => ({ name: u.name, role: u.role, active: u.active })) };
 }
 
-function revokeSession_(token) {
-  if (token) CacheService.getScriptCache().remove(`sess_${token}`);
-}
-
-function revokeAllUserSessions_(name) {
-  // Note: Apps Script CacheService doesn't support pattern deletion
-  // Sessions will naturally expire or fail on next verification
-  // This is a placeholder for future enhancement if needed
-}
-
 function ensureDailyTab_() {
   const ss = spreadsheet_();
   const tab = todayTabName_();
@@ -651,7 +685,7 @@ function lastEditorText_(displayName) {
 }
 
 function requireWithinHours_(role) {
-  if (role === "admin") return;
+  if (role === "admin" || role === "superAdmin") return;
   const settings = readSettings_();
   const closeTime = String(settings.closeTime || "21:00");
   const closeParts = closeTime.split(":");
@@ -692,25 +726,47 @@ function clockIn_(payload) {
   throw new Error("Attendance row not found");
 }
 
-function txTableStartRow_(sh) {
-  const vals = sh.getRange(1, 1, sh.getLastRow(), 1).getValues();
-  for (let r = 1; r <= vals.length; r++) {
-    const v = String(vals[r - 1][0]);
-    if (v === todayTabName_()) return r;
+function txHeaderRow_(sh) {
+  const max = Math.min(100, sh.getLastRow());
+  if (max === 0) return 0;
+  const vals = sh.getRange(1, 1, max, 1).getValues();
+  for (let r = 1; r <= max; r++) {
+    const v = String(vals[r - 1][0]).trim().toUpperCase();
+    if (v === "S/N" || v === "SN") return r;
   }
-  // fallback: find first date-like line after attendance
-  return 3 + staffCount_() + 2;
+  for (let r = 1; r <= max; r++) {
+    const v = String(vals[r - 1][0]).trim();
+    if (v === todayTabName_() || /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{2}\s+[A-Za-z]{3}\s+\d{4}/i.test(v)) {
+      return r + 1;
+    }
+  }
+  return 3 + staffCount_() + 3;
+}
+
+function isRealStaffName_(name) {
+  if (!name || typeof name !== "string") return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const upper = trimmed.toUpperCase();
+  if (upper === "S/N" || upper === "SN" || upper === "NAME" || upper === "ATTENDANCE" || upper === "ADMIN") return false;
+  if (/^\d+$/.test(trimmed)) return false;
+  if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(trimmed)) return false;
+  return true;
 }
 
 function readAttendance_(sh) {
-  const max = Math.min(100, Math.max(0, sh.getLastRow() - 2));
-  if (max <= 0) return [];
+  const headerRow = txHeaderRow_(sh);
+  if (headerRow <= 0) return [];
+  const count = Math.max(0, headerRow - 4);
+  if (count <= 0) return [];
   const out = [];
-  sh.getRange(3, 1, max, 4).getValues().forEach(r => {
-    if (String(r[0]).trim() === "") return; // stop at the blank row before the transactions table
+  const rows = sh.getRange(3, 1, count, 4).getValues();
+  rows.forEach(r => {
+    const name = String(r[0] || "").trim();
+    if (!name || !isRealStaffName_(name)) return;
     out.push({
-      name: r[0],
-      in: !!r[1],
+      name: name,
+      in: Boolean(r[1]),
       time: String(r[2] || ""),
       arrival: String(r[3] || ""),
     });
@@ -728,17 +784,16 @@ function listToday_(payload) {
   // Attendance
   const attendance = readAttendance_(sh);
 
-  // Transactions - dynamically find column indices from header row
-  const startRow = txTableStartRow_(sh);
-  const headerRow = startRow + 1;
+  // Transactions - dynamically find header row
+  const headerRow = txHeaderRow_(sh);
   const dataStart = headerRow + 1;
   const lastRow = sh.getLastRow();
   const rowCount = Math.max(0, lastRow - dataStart + 1);
-  if (rowCount === 0) {
+  if (rowCount <= 0) {
     return { tabName: tabName, role: sess.role, me: sess.name, attendance: attendance, transactions: [] };
   }
 
-  // Read header row to map column names to indices (case-insensitive, space-tolerant)
+  // Read header row to map column names to indices
   const headers = sh.getRange(headerRow, 1, 1, 15).getValues()[0];
   const colIndex = {};
   headers.forEach((h, i) => {
@@ -746,11 +801,14 @@ function listToday_(payload) {
     if (key) colIndex[key] = i;
   });
 
-  // Helper to get value by flexible column name
-  const getCol = (row, names) => {
+  // Helper to get value by flexible column name with fallback index
+  const getCol = (row, names, fallbackIdx) => {
     for (const n of names) {
       const idx = colIndex[n.toLowerCase().replace(/\s+/g, "")];
       if (idx !== undefined) return String(row[idx] || "");
+    }
+    if (fallbackIdx !== undefined && fallbackIdx < row.length) {
+      return String(row[fallbackIdx] || "");
     }
     return "";
   };
@@ -758,29 +816,30 @@ function listToday_(payload) {
   const rows = sh.getRange(dataStart, 1, rowCount, 15).getValues();
   const tx = [];
   rows.forEach(r => {
-    const name = getCol(r, ["name", "clientname", "client"]);
-    const amount = getCol(r, ["amount", "amt"]);
-    const serviceType = getCol(r, ["servicetype", "service", "itemname", "item"]);
-    const servedBy = getCol(r, ["servedby", "barber", "stylist"]);
-    const groomedBy = getCol(r, ["groomedby", "groomer", "shampoogirl"]);
-    const payMethod = getCol(r, ["paymethod", "paymentmethod", "method"]);
-    const status = getCol(r, ["status", "state"]);
-    const mpesaTo = getCol(r, ["mpesato", "mpesa"]);
-    const lastEditor = getCol(r, ["lasteditor", "last editor", "editor"]);
-    const txId = getCol(r, ["txid", "id"]);
-    const createdBy = getCol(r, ["createdby", "creator"]);
-    const deviceId = getCol(r, ["deviceid", "device"]);
-    const createdAt = getCol(r, ["createdat", "created", "timestamp"]);
-    const txType = getCol(r, ["txtype", "type"]);
+    const name = getCol(r, ["name", "clientname", "client"], 1);
+    const amountStr = getCol(r, ["amount", "amt"], 2);
+    const amount = Number(amountStr || 0);
+    const serviceType = getCol(r, ["servicetype", "service", "itemname", "item"], 3);
+    const servedBy = getCol(r, ["servedby", "barber", "stylist"], 4);
+    const groomedBy = getCol(r, ["groomedby", "groomer", "shampoogirl"], 5);
+    const payMethod = getCol(r, ["paymethod", "paymentmethod", "method"], 6);
+    const status = getCol(r, ["status", "state"], 7);
+    const mpesaTo = getCol(r, ["mpesato", "mpesa"], 8);
+    const lastEditor = getCol(r, ["lasteditor", "last editor", "editor"], 9);
+    const txId = getCol(r, ["txid", "id"], 10);
+    const createdBy = getCol(r, ["createdby", "creator"], 11);
+    const deviceId = getCol(r, ["deviceid", "device"], 12);
+    const createdAt = getCol(r, ["createdat", "created", "timestamp"], 13);
+    const txType = getCol(r, ["txtype", "type"], 14);
 
     // Stop at first fully empty row
-    if (!name && !amount && !servedBy && !payMethod && !status && !mpesaTo) return;
+    if (!name && !amountStr && !servedBy && !payMethod && !status && !mpesaTo) return;
 
     tx.push({
       txId: txId,
-      sn: getCol(r, ["s/n", "sn", "no"]),
+      sn: getCol(r, ["s/n", "sn", "no"], 0),
       clientName: name,
-      amount: Number(amount || 0),
+      amount: amount,
       serviceType: serviceType,
       servedBy: servedBy,
       groomedBy: groomedBy,
@@ -830,8 +889,7 @@ function createTx_(payload) {
 
   try {
     const sh = ensureDailyTab_();
-    const startRow = txTableStartRow_(sh);
-    const dataStart = startRow + 3; // date row + header row + start
+    const dataStart = txHeaderRow_(sh) + 1; // header row + start
 
     // Find next empty row (scan down) - recheck after acquiring lock
     let r = dataStart;
@@ -870,8 +928,7 @@ function createTx_(payload) {
 }
 
 function findTxRow_(sh, txId) {
-  const startRow = txTableStartRow_(sh);
-  const dataStart = startRow + 3;
+  const dataStart = txHeaderRow_(sh) + 1;
   const lastRow = sh.getLastRow();
   if (lastRow < dataStart) return null;
   const rowCount = lastRow - dataStart + 1;
@@ -890,8 +947,7 @@ function findLegacyTxRow_(sh, payload) {
   const createdBy = String(payload.createdBy || "").trim();
   if (!clientName) return null;
 
-  const startRow = txTableStartRow_(sh);
-  const dataStart = startRow + 2;
+  const dataStart = txHeaderRow_(sh) + 1;
   const lastRow = sh.getLastRow();
   if (lastRow < dataStart) return null;
   const rowCount = lastRow - dataStart + 1;
@@ -1017,21 +1073,11 @@ function adminListDay_(payload) {
   // Reuse list logic but for a given tab
   const attendance = readAttendance_(sh);
 
-  // Dynamically find column indices from header row (same logic as listToday_)
-  const startRow = (() => {
-    const vals = sh.getRange(1, 1, sh.getLastRow(), 1).getValues();
-    for (let r = 1; r <= vals.length; r++) {
-      const v = String(vals[r - 1][0]);
-      if (v === dayTab) return r;
-    }
-    return 3 + staffCount_() + 2;
-  })();
-
-  const headerRow = startRow + 1;
+  const headerRow = txHeaderRow_(sh);
   const dataStart = headerRow + 1;
   const lastRow = sh.getLastRow();
   const rowCount = Math.max(0, lastRow - dataStart + 1);
-  if (rowCount === 0) {
+  if (rowCount <= 0) {
     return { tabName: dayTab, role: sess.role, me: sess.name, attendance: attendance, transactions: [] };
   }
 
@@ -1043,10 +1089,13 @@ function adminListDay_(payload) {
     if (key) colIndex[key] = i;
   });
 
-  const getCol = (row, names) => {
+  const getCol = (row, names, fallbackIdx) => {
     for (const n of names) {
       const idx = colIndex[n.toLowerCase().replace(/\s+/g, "")];
       if (idx !== undefined) return String(row[idx] || "");
+    }
+    if (fallbackIdx !== undefined && fallbackIdx < row.length) {
+      return String(row[fallbackIdx] || "");
     }
     return "";
   };
@@ -1054,28 +1103,29 @@ function adminListDay_(payload) {
   const rows = sh.getRange(dataStart, 1, rowCount, 15).getValues();
   const tx = [];
   rows.forEach(r => {
-    const name = getCol(r, ["name", "clientname", "client"]);
-    const amount = getCol(r, ["amount", "amt"]);
-    const serviceType = getCol(r, ["servicetype", "service", "itemname", "item"]);
-    const servedBy = getCol(r, ["servedby", "barber", "stylist"]);
-    const groomedBy = getCol(r, ["groomedby", "groomer", "shampoogirl"]);
-    const payMethod = getCol(r, ["paymethod", "paymentmethod", "method"]);
-    const status = getCol(r, ["status", "state"]);
-    const mpesaTo = getCol(r, ["mpesato", "mpesa"]);
-    const lastEditor = getCol(r, ["lasteditor", "last editor", "editor"]);
-    const txId = getCol(r, ["txid", "id"]);
-    const createdBy = getCol(r, ["createdby", "creator"]);
-    const deviceId = getCol(r, ["deviceid", "device"]);
-    const createdAt = getCol(r, ["createdat", "created", "timestamp"]);
-    const txType = getCol(r, ["txtype", "type"]);
+    const name = getCol(r, ["name", "clientname", "client"], 1);
+    const amountStr = getCol(r, ["amount", "amt"], 2);
+    const amount = Number(amountStr || 0);
+    const serviceType = getCol(r, ["servicetype", "service", "itemname", "item"], 3);
+    const servedBy = getCol(r, ["servedby", "barber", "stylist"], 4);
+    const groomedBy = getCol(r, ["groomedby", "groomer", "shampoogirl"], 5);
+    const payMethod = getCol(r, ["paymethod", "paymentmethod", "method"], 6);
+    const status = getCol(r, ["status", "state"], 7);
+    const mpesaTo = getCol(r, ["mpesato", "mpesa"], 8);
+    const lastEditor = getCol(r, ["lasteditor", "last editor", "editor"], 9);
+    const txId = getCol(r, ["txid", "id"], 10);
+    const createdBy = getCol(r, ["createdby", "creator"], 11);
+    const deviceId = getCol(r, ["deviceid", "device"], 12);
+    const createdAt = getCol(r, ["createdat", "created", "timestamp"], 13);
+    const txType = getCol(r, ["txtype", "type"], 14);
 
-    if (!name && !amount && !servedBy && !payMethod && !status && !mpesaTo) return;
+    if (!name && !amountStr && !servedBy && !payMethod && !status && !mpesaTo) return;
 
     tx.push({
       txId: txId,
-      sn: getCol(r, ["s/n", "sn", "no"]),
+      sn: getCol(r, ["s/n", "sn", "no"], 0),
       clientName: name,
-      amount: Number(amount || 0),
+      amount: amount,
       serviceType: serviceType,
       servedBy: servedBy,
       groomedBy: groomedBy,
@@ -1114,9 +1164,10 @@ function manageStaff_(payload) {
     const newSalt = generateSalt_();
     u.sh.getRange(u.row, 3).setValue(""); // clear PIN hash
     u.sh.getRange(u.row, 4).setValue(newSalt); // set new salt
+    u.sh.getRange(u.row, 6).setValue(""); // clear deviceIds so user can register new device
     // Revoke all sessions for this user immediately
     revokeAllUserSessions_(name);
-    writeAudit_(sess.name, "PIN_RESET", name, "PIN reset by admin", "");
+    writeAudit_(sess.name, "PIN_RESET", name, "PIN reset and device unlocked by admin", "");
   } else if (action === "provision") {
     // Admin provisions first-time PIN for a staff member
     const pin = String(payload.pin || "");
@@ -1429,4 +1480,81 @@ function setBarberFree_(payload) {
   markBarberFree_(ensureBarberTab_(), barber, Boolean(payload.free));
   writeAudit_(sess.name, "SET_BARBER_FREE", barber, `Free: ${payload.free}`, "");
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-backup: archive daily tabs older than 10 days, then delete them
+// ---------------------------------------------------------------------------
+
+// Backs up daily tabs older than 10 days into the archive spreadsheet, then
+// removes them from the active spreadsheet. Run this daily via a time-driven
+// trigger (Apps Script -> Triggers -> Add trigger -> backupAndKeepLast10Days,
+// Time-driven, Day timer, 1am-2am).
+
+function backupAndKeepLast10Days() {
+  var activeSs = SpreadsheetApp.getActiveSpreadsheet();
+  // Archive spreadsheet (change this if you want a different backup file).
+  var archiveSs = SpreadsheetApp.openByUrl("https://docs.google.com/spreadsheets/d/1KIJdEmayr0E_1uHJPSaYCZ3uF15ST5ynT7F1kS54un0/edit?gid=0#gid=0");
+
+  // Daily tab names for the last 10 days (including today) stay in the app.
+  var allowedNames = [];
+  for (var d = 0; d < 10; d++) {
+    var date = new Date();
+    date.setDate(date.getDate() - d);
+    allowedNames.push(Utilities.formatDate(date, TZ, "EEE dd MMM yyyy"));
+  }
+
+  // System tabs that must NEVER be touched or deleted. Includes the app's real
+  // admin tab "__ADMIN__" (the old "_ADMIN_" spelling is kept for safety too),
+  // plus the QUEUE / BARBERS / Bookings tabs so live data is never archived.
+  var protectedSheets = [ADMIN_TAB, "_ADMIN_", QUEUE_TAB, BARBERS_TAB, "Bookings"];
+
+  var isProtected = function (name) {
+    return protectedSheets.indexOf(name) !== -1;
+  };
+
+  // Only archive sheets that actually look like a daily tab
+  // (e.g. "Wed 03 Jun 2026"), so we never touch unknown tabs.
+  var isDailyTab = function (name) {
+    return /^[A-Z][a-z]{2}\s\d{2}\s[A-Z][a-z]{2}\s\d{4}$/.test(name);
+  };
+
+  // Existing sheet names in the archive (avoids duplicate-name crashes).
+  var archiveNames = {};
+  archiveSs.getSheets().forEach(function (s) { archiveNames[s.getName()] = true; });
+
+  var sheets = activeSs.getSheets();
+  for (var i = sheets.length - 1; i >= 0; i--) {
+    var sheet = sheets[i];
+    var sheetName = sheet.getName();
+
+    if (isProtected(sheetName)) continue;          // system tab -> keep
+    if (!isDailyTab(sheetName)) continue;          // not a daily tab -> keep
+    if (allowedNames.indexOf(sheetName) !== -1) continue; // last 10 days -> keep
+
+    // Older than 10 days: copy to the archive, then remove from the app.
+    if (!archiveNames[sheetName]) {
+      var copiedSheet = sheet.copyTo(archiveSs);
+      copiedSheet.setName(sheetName.replace("Copy of ", ""));
+      archiveNames[sheetName] = true;
+    }
+    activeSs.deleteSheet(sheet);
+  }
+}
+
+// Run ONCE after deploying to auto-schedule the daily archive trigger.
+// Open the script -> run installDailyBackupTrigger() from the editor,
+// then future day tabs are archived automatically at ~1am.
+function installDailyBackupTrigger() {
+  const existing = ScriptApp.getProjectTriggers().filter(
+    t => t.getHandlerFunction() === "backupAndKeepLast10Days"
+  );
+  if (existing.length === 0) {
+    ScriptApp.newTrigger("backupAndKeepLast10Days")
+      .timeBased()
+      .everyDays(1)
+      .atHour(1)
+      .create();
+  }
+  return "Daily backup trigger installed (runs ~1am).";
 }

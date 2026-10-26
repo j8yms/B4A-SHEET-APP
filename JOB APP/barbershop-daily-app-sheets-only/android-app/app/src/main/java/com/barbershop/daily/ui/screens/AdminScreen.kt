@@ -368,7 +368,7 @@ private fun WagesViewer(session: Session) {
 
         if (data != null) {
             val txs = data!!.transactions
-            val staffNames = data!!.attendance.map { it.name }.filter { it.isNotBlank() }
+            val staffNames = data!!.attendance.map { it.name }.filter { com.barbershop.daily.data.isRealStaffName(it) }
                 .ifEmpty { listOf("Ng'ash", "Jay", "Esther") }
 
             // Determine groomers dynamically from today's transactions

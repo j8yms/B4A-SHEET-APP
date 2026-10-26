@@ -21,7 +21,7 @@ import com.barbershop.daily.data.TodayData
 fun ReportsScreen(session: Session, today: TodayData) {
     val txs = today.transactions
 
-    val isEstherOrCate = session.name.equals("Esther", ignoreCase = true) || session.name.equals("Cate", ignoreCase = true)
+    val isGroomerRole = txs.any { it.groomedBy.equals(session.name, ignoreCase = true) }
 
     val cashAtHand = txs
         .filter { it.payMethod == "Cash" || it.payMethod == "Withdraw" }
@@ -30,8 +30,8 @@ fun ReportsScreen(session: Session, today: TodayData) {
     val byStaffClients = remember(txs) {
         val counts = mutableMapOf<String, Double>()
         txs.forEach { tx ->
-            if (isEstherOrCate) {
-                // If viewed by Esther or Cate, chart represents grooming counts
+            if (isGroomerRole) {
+                // If viewed by a groomer, chart represents grooming counts
                 val groomer = tx.groomedBy
                 if (groomer.isNotBlank() && !groomer.equals("None", ignoreCase = true)) {
                     counts[groomer] = (counts[groomer] ?: 0.0) + 1.0
@@ -94,7 +94,7 @@ fun ReportsScreen(session: Session, today: TodayData) {
             Spacer(Modifier.height(24.dp))
         }
 
-        val chartTitle = if (isEstherOrCate) "Staff Performance (Grooming)" else "Staff Performance (Shaving)"
+        val chartTitle = if (isGroomerRole) "Staff Performance (Grooming)" else "Staff Performance (Shaving)"
         Text(chartTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
         
@@ -111,19 +111,14 @@ fun ReportsScreen(session: Session, today: TodayData) {
 @Composable
 fun StaffPerformancePieChart(data: Map<String, Double>, total: Double) {
     val sliceColors = listOf(
-        Color(0xFFE91E63), // Pink (Ng'ash)
-        Color(0xFF39FF14), // Neon Green (Jay)
-        Color(0xFF6200EA), // Deep Purple (Esther)
-        Color(0xFFFF5722), // Orange (Cate)
+        Color(0xFFE91E63), // Pink
+        Color(0xFF39FF14), // Neon Green
+        Color(0xFF6200EA), // Deep Purple
+        Color(0xFFFF5722), // Orange
         Color(0xFF00E5FF), // Cyan
-        Color(0xFF00BCD4)  // Teal
-    )
-
-    val staffColorMap = mapOf(
-        "Ng'ash" to Color(0xFFE91E63),
-        "Jay" to Color(0xFF39FF14),
-        "Esther" to Color(0xFF6200EA),
-        "Cate" to Color(0xFFFF5722)
+        Color(0xFF00BCD4), // Teal
+        Color(0xFFFF9800), // Amber
+        Color(0xFF4CAF50), // Green
     )
 
     val chartData = data.entries.toList()
@@ -133,8 +128,7 @@ fun StaffPerformancePieChart(data: Map<String, Double>, total: Double) {
             Canvas(modifier = Modifier.size(180.dp)) {
                 var startAngle = -90f
                 chartData.forEachIndexed { index, entry ->
-                    val color = staffColorMap.entries.find { it.key.equals(entry.key, ignoreCase = true) }?.value 
-                        ?: sliceColors[index % sliceColors.size]
+                    val color = sliceColors[index % sliceColors.size]
                     
                     val sweepAngle = (entry.value / total).toFloat() * 360f
                     drawArc(
@@ -153,8 +147,7 @@ fun StaffPerformancePieChart(data: Map<String, Double>, total: Double) {
         // Legend
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             chartData.forEachIndexed { index, entry ->
-                val color = staffColorMap.entries.find { it.key.equals(entry.key, ignoreCase = true) }?.value 
-                    ?: sliceColors[index % sliceColors.size]
+                val color = sliceColors[index % sliceColors.size]
                 
                 val percentage = (entry.value / total * 100).toInt()
                 Row(verticalAlignment = Alignment.CenterVertically) {

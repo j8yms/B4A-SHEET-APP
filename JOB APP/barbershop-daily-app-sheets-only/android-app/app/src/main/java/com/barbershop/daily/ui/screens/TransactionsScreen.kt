@@ -15,6 +15,7 @@ import com.barbershop.daily.data.SheetsRepository
 import com.barbershop.daily.data.TodayData
 import com.barbershop.daily.data.TransactionEntry
 import com.barbershop.daily.data.UserProfile
+import com.barbershop.daily.data.displayTime
 import kotlinx.coroutines.launch
 
 private val payMethods = listOf("Cash", "M-pesa", "Withdraw")
@@ -274,7 +275,11 @@ private fun TransactionRow(
 ) {
     Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
         Column(Modifier.padding(12.dp)) {
-            Text("${tx.clientName} — ${tx.amount.toInt()} (${tx.serviceType})", style = MaterialTheme.typography.titleMedium)
+            Text("${tx.clientName} — KES ${tx.amount.toInt()} (${tx.serviceType})", style = MaterialTheme.typography.titleMedium)
+            val timeText = tx.displayTime()
+            if (timeText.isNotBlank()) {
+                Text("⏱ $timeText", style = MaterialTheme.typography.labelSmall, color = androidx.compose.ui.graphics.Color(0xFF39FF14))
+            }
             Text("Served by: ${tx.servedBy}${if (tx.groomedBy.isNotBlank()) " | Groomed by: ${tx.groomedBy}" else ""}")
             Text("Pay: ${tx.payMethod} | Status: ${tx.status} | Mpesa to: ${tx.mpesaTo}")
             if (tx.createdBy.isNotBlank()) Text("By: ${tx.createdBy}", style = MaterialTheme.typography.bodySmall)

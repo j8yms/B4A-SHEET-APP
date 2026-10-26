@@ -1,0 +1,12 @@
+.gradle/
+.idea/
+*.iml
+local.properties
+
+android-app/**/build/
+android-app/**/.cxx/
+
+functions/node_modules/
+functions/lib/
+functions/.env
+

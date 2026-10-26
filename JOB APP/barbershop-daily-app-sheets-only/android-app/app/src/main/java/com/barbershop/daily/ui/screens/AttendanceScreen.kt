@@ -65,8 +65,13 @@ fun AttendanceScreen(profile: UserProfile, session: Session) {
         Text("Staff status", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
 
+        val staffList = remember(today.attendance) {
+            val names = today.attendance.map { it.name.trim() }.filter { com.barbershop.daily.data.isRealStaffName(it) }
+            if (names.isNotEmpty()) names else fallbackStaff
+        }
+
         LazyColumn(Modifier.weight(1f)) {
-            items(fallbackStaff) { name ->
+            items(staffList) { name ->
                 val entry: AttendanceEntry? = byName[name]
                 val status = when {
                     entry != null -> entry.arrival.ifBlank { "IN" }

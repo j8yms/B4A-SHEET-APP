@@ -124,7 +124,8 @@ fun LoginScreen(onSignedIn: () -> Unit) {
                     loading = false
                     return@launch
                 }
-                val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                val rawDeviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                val deviceId = if (rawDeviceId.isNullOrBlank()) "device_${context.packageName}" else rawDeviceId
                 val session = SheetsRepository.login(name, pinValue, deviceId)
                 SessionStore.save(context, session)
                 if (rememberPin) {

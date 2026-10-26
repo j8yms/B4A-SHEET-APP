@@ -45,12 +45,33 @@ fun DashboardScreen(profile: UserProfile, session: Session, today: TodayData) {
 
     val isJay = session.name.equals("Jay", ignoreCase = true)
     val isNgash = session.name.equals("Ng'ash", ignoreCase = true)
-    val isEstherOrCate = session.name.equals("Esther", ignoreCase = true) || session.name.equals("Cate", ignoreCase = true)
+    val isShampooGirl = !isJay && !isNgash
     val isBarber = isJay || isNgash
 
-    val clientCount = if (isJay || isNgash || isEstherOrCate) {
+    val groomerNames = remember(today.attendance, today.transactions) {
+        fun isGroomerCandidate(name: String): Boolean {
+            val n = name.trim()
+            return com.barbershop.daily.data.isRealStaffName(n)
+                && !n.equals("Jay", ignoreCase = true)
+                && !n.equals("Ng'ash", ignoreCase = true)
+                && !n.contains("cashier", ignoreCase = true)
+        }
+        val names = today.attendance
+            .map { it.name.trim() }
+            .filter { isGroomerCandidate(it) }
+            .toMutableSet()
+        today.transactions.forEach { tx ->
+            val groomer = tx.groomedBy.trim()
+            if (groomer.isNotBlank() && groomer != "None" && isGroomerCandidate(groomer)) {
+                names.add(groomer)
+            }
+        }
+        names.toList()
+    }
+
+    val clientCount = if (isJay || isNgash || isShampooGirl) {
         today.transactions.count { 
-            if (isEstherOrCate) it.groomedBy.equals(session.name, ignoreCase = true)
+            if (isShampooGirl) it.groomedBy.equals(session.name, ignoreCase = true)
             else it.servedBy.equals(session.name, ignoreCase = true)
         }
     } else {
@@ -64,12 +85,12 @@ fun DashboardScreen(profile: UserProfile, session: Session, today: TodayData) {
                 tx.serviceType.equals("Dye", ignoreCase = true) -> 150.0
                 tx.serviceType.equals("Shave", ignoreCase = true) -> {
                     if (isBarber) tx.amount * 0.4
-                    else if (isEstherOrCate) tx.amount * 0.25
+                    else if (isShampooGirl) tx.amount * 0.25
                     else tx.amount * 0.4
                 }
                 else -> tx.amount * 0.4
             }
-        } + if (isEstherOrCate) {
+        } + if (isShampooGirl) {
             val groomingCount = today.transactions.count { 
                 it.groomedBy.equals(session.name, ignoreCase = true) && !it.servedBy.equals(session.name, ignoreCase = true) 
             }
@@ -108,7 +129,6 @@ fun DashboardScreen(profile: UserProfile, session: Session, today: TodayData) {
             ) {
                 Text(lastRefreshText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = {
-                    // Trigger manual refresh
                     val currentSession = SessionStore.load(context)
                     if (currentSession != null) {
                         scope.launch {
@@ -147,7 +167,7 @@ fun DashboardScreen(profile: UserProfile, session: Session, today: TodayData) {
             color = MaterialTheme.colorScheme.secondary
         )
 
-        if (isJay || isNgash || isEstherOrCate) {
+        if (isJay || isNgash || isShampooGirl) {
             Spacer(Modifier.height(24.dp))
             Text("Personal Earnings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
@@ -174,36 +194,113 @@ fun DashboardScreen(profile: UserProfile, session: Session, today: TodayData) {
         // Row of Stats
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             StatCard(
-                label = if (isJay) "My Clients Today" else if (isEstherOrCate) "My Clients" else "Total Shop Clients",
-                value = if (isClockedIn || (!isJay && !isNgash && !isEstherOrCate)) clientCount.toString() else "_",
+                label = if (isJay) "My Clients Today" else if (isShampooGirl) "My Clients" else "Total Shop Clients",
+                value = if (isClockedIn || (!isJay && !isNgash && !isShampooGirl)) clientCount.toString() else "_",
                 icon = Icons.Default.People,
                 color = MaterialTheme.colorScheme.tertiaryContainer,
                 modifier = Modifier.fillMaxWidth()
             )
         }
 
-        if (isEstherOrCate) {
-            val cateCount = today.transactions.count { it.groomedBy.equals("Cate", ignoreCase = true) }
-            val estherCount = today.transactions.count { it.groomedBy.equals("Esther", ignoreCase = true) }
-            
+        // Shampoo Girls Competition Leaderboard
+        if (groomerNames.isNotEmpty()) {
             Spacer(Modifier.height(24.dp))
-            Text("Competition", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("🏆 Groomer Competition & Daily Share", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                StatCard(
-                    label = "Cate's Count",
-                    value = cateCount.toString(),
-                    icon = Icons.Default.Person,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.weight(1f)
-                )
-                StatCard(
-                    label = "Esther's Count",
-                    value = estherCount.toString(),
-                    icon = Icons.Default.Person,
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.weight(1f)
-                )
+
+            val sortedGroomers = groomerNames.map { gName ->
+                val count = today.transactions.count { it.groomedBy.equals(gName, ignoreCase = true) }
+                val wageCount = today.transactions.count { it.groomedBy.equals(gName, ignoreCase = true) && !it.servedBy.equals(gName, ignoreCase = true) }
+                val wage = if (wageCount < 10) 500.0 else wageCount * 60.0
+                val comm = today.transactions.filter { it.servedBy.equals(gName, ignoreCase = true) }.sumOf { tx ->
+                    when {
+                        tx.serviceType.equals("Dye", ignoreCase = true) -> 150.0
+                        tx.serviceType.equals("Shave", ignoreCase = true) -> tx.amount * 0.25
+                        else -> tx.amount * 0.4
+                    }
+                }
+                Triple(gName, count, wage + comm)
+            }.sortedWith(compareByDescending<Triple<String, Int, Double>> { it.second }.thenByDescending { it.third })
+
+            val maxGroomed = (sortedGroomers.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    sortedGroomers.forEachIndexed { index, (gName, count, share) ->
+                        val isMe = gName.equals(session.name, ignoreCase = true)
+                        val rankSymbol = when (index) {
+                            0 -> "🥇 #1"
+                            1 -> "🥈 #2"
+                            2 -> "🥉 #3"
+                            else -> "#${index + 1}"
+                        }
+                        
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Text(
+                                    rankSymbol,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (index == 0) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    gName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isMe) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isMe) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            "YOU",
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Black,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    "$count groomed",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    "Share: KES ${share.toInt()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+
+                        LinearProgressIndicator(
+                            progress = { count.toFloat() / maxGroomed.toFloat() },
+                            modifier = Modifier.fillMaxWidth().height(6.dp),
+                            color = if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                            trackColor = MaterialTheme.colorScheme.surface
+                        )
+                        if (index < sortedGroomers.size - 1) {
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
             }
         }
 
@@ -226,7 +323,6 @@ fun DashboardScreen(profile: UserProfile, session: Session, today: TodayData) {
                     val displayTime = remember(myAttendance?.time) {
                         val t = myAttendance?.time ?: ""
                         if (t.contains("1899")) {
-                            // Try to extract time if present, else just "IN"
                             val timePart = t.split(" ").firstOrNull { it.contains(":") }
                             if (timePart != null) timePart else "IN"
                         } else t
@@ -286,7 +382,7 @@ fun DashboardScreen(profile: UserProfile, session: Session, today: TodayData) {
         Text("Staff Status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         
-        today.attendance.filter { it.name.isNotBlank() && !it.name.equals("Admin", ignoreCase = true) }.forEach { entry ->
+        today.attendance.filter { com.barbershop.daily.data.isRealStaffName(it.name) }.forEach { entry ->
             val isEditing = today.transactions.any { it.lastEditor == entry.name }
             Card(
                 Modifier

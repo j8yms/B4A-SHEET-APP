@@ -18,6 +18,7 @@ import com.barbershop.daily.data.SheetsRepository
 import com.barbershop.daily.data.TodayData
 import com.barbershop.daily.data.TransactionEntry
 import com.barbershop.daily.data.UserProfile
+import com.barbershop.daily.data.displayTime
 import kotlinx.coroutines.launch
 
 import androidx.compose.ui.text.style.TextOverflow
@@ -158,24 +159,12 @@ fun TransactionItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                val timeText = if (tx.createdAt.isNotBlank()) {
-                    formatTimeOnly(tx.createdAt)
-                } else if (tx.lastEditor.isNotBlank()) {
-                    extractTimeFromLastEditor(tx.lastEditor)
-                } else ""
+                val timeText = tx.displayTime()
                 if (timeText.isNotBlank()) {
                     Text(
                         text = "⏱ $timeText",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF39FF14),
-                        fontWeight = FontWeight.Bold
-                    )
-                } else {
-                    // Debug: show if no time data available
-                    Text(
-                        text = "⏱ NO TIME",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Red,
                         fontWeight = FontWeight.Bold
                     )
                 }
